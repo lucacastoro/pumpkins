@@ -4,6 +4,7 @@ import getpass
 import jenkins
 import re
 import xml.etree.ElementTree as XML
+import pdb
 
 # https://python-jenkins.readthedocs.io/en/latest/examples.html
 
@@ -132,14 +133,14 @@ class Info(object):
 
 class Configuration(object):
 
-    __slots__ = ('_node', '_parent')
+    __slots__ = ('_node', '_parent', '_header')
 
     _header = "<?xml version='1.0' encoding='UTF-8'?>\n"
 
     def __init__(self, conf, parent):
         self._parent = parent
         if isinstance(conf, unicode):
-            self._node = XML.fromstring(config)
+            self._node = XML.fromstring(conf)
             assert(self._node.tag == 'project')
         else:
             self._node = conf
@@ -148,23 +149,26 @@ class Configuration(object):
         child = [c for c in self._node if c.tag == name ]
         if not child:
             raise AttributeError('Attribute %s not found' % name)
-        return Configuration(child)
+        return Configuration(child[0], self)
 
     def __setattr__(self, name, value):
+        if name in self.__slots__:
+            return object.__setattr__(self, name, value)
         child = [c for c in self._node if c.tag == name ]
         if not child:
             raise AttributeError('Attribute %s not found' % name)
-        child = value
-        _reconfigure()
+        
+        child[0].text = str(value)
+        self._reconfigure()
 
     def _reconfigure(self):
-        if isinstance(self_parent, Configuration):
-            self._parent.reconfigure()
+        if isinstance(self._parent, Configuration):
+            self._parent._reconfigure()
         else:
-            self._parent.configuration = self
+            self._parent._apply(self)
 
     def toXML(self):
-        return _header + XML.tostring(self._node)
+        return self._header + XML.tostring(self._node)
 
     def __str__(self):
         return self._node.text
@@ -206,6 +210,9 @@ class Job(object):
 
     @configuration.setter
     def configuration(self, conf):
+        self._apply(conf)
+
+    def _apply(self, conf):
         self._server.reconfig_job(self.name, conf.toXML())
 
     def copy(self, newname):
@@ -234,7 +241,15 @@ class Job(object):
         info = Info(self._server.get_job_info(self.name))
         if hasattr(info, name):
             return getattr(info, name)
+        if hasattr(self.configuration, name):
+            return getattr(self.configuration, name)
         raise AttributeError('Attribute %s not found' % name)
+
+    def __setattr__(self, name, value):
+        if name in self.__slots__:
+            return object.__setattr__(self, name, value)
+        if hasattr(self.configuration, name):
+            setattr(self.configuration, name, value)
 
     def __str__(self):
         return self.name
@@ -327,9 +342,9 @@ class Pumpkins(object):
 
 if __name__ == '__main__':
 
-    server = Pumpkins('http://localhost:8080')
+    host = Pumpkins('http://localhost:8080', username='admin', password='admin')
 
-    if not server:
+    if not host:
         print('Server initialization failed')
         exit(1)
 
@@ -337,5 +352,6 @@ if __name__ == '__main__':
         hour = datetime.datetime.now().hour
         return 'good %s %s' % ('morning' if hour < 13 else 'evening', user)
 
-    print('Connection to server established, %s' % (greetings(server.me)))
+    print('Connection to server established, %s' % (greetings(host.me)))
 
+    host.job('test').concurrentBuild = True
