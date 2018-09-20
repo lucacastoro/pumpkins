@@ -1,6 +1,6 @@
 FROM jenkins
 USER root
-RUN apt-get update && apt-get -y install python-pip
+RUN apt-get update && apt-get -y install python-pip vim
 ENV HOME=/home/jenkins
 RUN mkdir -p ${HOME}
 COPY start-jenkins.sh ${HOME}/
