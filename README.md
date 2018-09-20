@@ -16,14 +16,14 @@ Launch the container with:
 - Run `python /staging/pumpkins.py` to verify that everything is working properly.
 
 On the bash shell you have ipython and python-jenkins ready to be used,
-(as well as VIM, you're welcome) so doing:
+(as well as VIM, you're welcome) so doing...
 ```
 jenkins@pumpkins:~$ ipython
 In[1]: import pumpkins
 In[2]: host = pumpkins.Pumpkins('http://localhost:8080')
 In[3]: print(host.me)
 ```
-Should do the work
+...should do the work
 
 The Docker image is used only for developing/purpose testing, as such it makes little sense to embed
 the Python library itself into the container, more useful is mounting the repository root folder
@@ -34,5 +34,5 @@ having to type `import sys; sys.append(...)` every time you spawn a `python`/`ip
 
 The Docker image is built on top of the jenkins image (https://hub.docker.com/_/jenkins/) and as such
 it exposes the 50000 and 8080 TCP ports, only the 8080 is needed to access the web interface so
-I would not bother accessing the 50000 as well.
+I would not bother exposing the 50000 as well.
 

@@ -3,6 +3,7 @@ import datetime
 import getpass
 import jenkins
 import re
+import xml.etree.ElementTree as XML
 
 # https://python-jenkins.readthedocs.io/en/latest/examples.html
 
@@ -48,11 +49,10 @@ class Build(object):
 
 class Info(object):
 
-    __slots__ = ('_info', '_builds')
+    __slots__ = ('_info')
 
     def __init__(self, info):
         self._info = info
-        self._builds = None
 
     @property
     def description(self):
@@ -84,9 +84,7 @@ class Info(object):
 
     @property
     def builds(self):
-        if not self._builds:
-            self._builds = [Build(b) for b in self._info['builds']]
-        return self._builds
+        return [Build(b) for b in self._info['builds']]
 
     def _get_build(self, name):
         number = self._info[name]['number']
@@ -103,7 +101,10 @@ class Info(object):
 
     @property
     def parameters(self):
-        return [Parameter(p) for p in self._info['property'][0]['parameterDefinitions']]
+        return [
+            Parameter(p)
+            for p in self._info['property'][0]['parameterDefinitions']
+        ]
         
     @property
     def lastCompletedBuild(self):
@@ -129,14 +130,55 @@ class Info(object):
     def lastUnsuccessfulBuild(self):
         return self._get_build('lastUnsuccessfulBuild')
 
+class Configuration(object):
+
+    __slots__ = ('_node', '_parent')
+
+    _header = "<?xml version='1.0' encoding='UTF-8'?>\n"
+
+    def __init__(self, conf, parent):
+        self._parent = parent
+        if isinstance(conf, unicode):
+            self._node = XML.fromstring(config)
+            assert(self._node.tag == 'project')
+        else:
+            self._node = conf
+
+    def __getattr__(self, name):
+        child = [c for c in self._node if c.tag == name ]
+        if not child:
+            raise AttributeError('Attribute %s not found' % name)
+        return Configuration(child)
+
+    def __setattr__(self, name, value):
+        child = [c for c in self._node if c.tag == name ]
+        if not child:
+            raise AttributeError('Attribute %s not found' % name)
+        child = value
+        _reconfigure()
+
+    def _reconfigure(self):
+        if isinstance(self_parent, Configuration):
+            self._parent.reconfigure()
+        else:
+            self._parent.configuration = self
+
+    def toXML(self):
+        return _header + XML.tostring(self._node)
+
+    def __str__(self):
+        return self._node.text
+    
+    def __repr__(self):
+        return self.__str__()
+
 class Job(object):
 
-    __slots__ = ('_job', '_server', '_info')
+    __slots__ = ('_job', '_server')
 
     def __init__(self, job, server):
         self._job = job
         self._server = server
-        self._info = None
 
     @property
     def kind(self):
@@ -158,6 +200,14 @@ class Job(object):
     def fullname(self):
         return self._job['fullname']
 
+    @property
+    def configuration(self):
+        return Configuration(self._server.get_job_config(self.name), self)
+
+    @configuration.setter
+    def configuration(self, conf):
+        self._server.reconfig_job(self.name, conf.toXML())
+
     def copy(self, newname):
         self._server.copy_job(self.name, newname)
         return Job(self._server.get_job(newname))
@@ -166,7 +216,7 @@ class Job(object):
         args = {}
         for k, v in kwargs.iteritems():
             args[k] = v
-        self._server.build_job(self.name, args)
+        return self._server.build_job(self.name, args)
 
     def reconfig(self):
         self._server.reconfig_job(self.name)
@@ -181,10 +231,9 @@ class Job(object):
         self._server.delete_job(self.name)
 
     def __getattr__(self, name):
-        if not self._info:
-            self._info = Info(self._server.get_job_info(self.name))
-        if hasattr(self._info, name):
-            return getattr(self._info, name)
+        info = Info(self._server.get_job_info(self.name))
+        if hasattr(info, name):
+            return getattr(info, name)
         raise AttributeError('Attribute %s not found' % name)
 
     def __str__(self):
@@ -230,11 +279,9 @@ class User(object):
 
 class Pumpkins(object):
 
-    __slots__ = ('_server', '_jobs')
+    __slots__ = ('_server')
 
     def __init__(self, url, username=None, password=None):
-
-        self._jobs = None
 
         if not username:
             sys.stdout.write('Username: ')
@@ -246,8 +293,6 @@ class Pumpkins(object):
 
         self._server = jenkins.Jenkins(url, username, password)
 
-    def _invalidate(self):
-        self._jobs = None
 
     def __bool__(self):  # 3.x
         try:
@@ -263,11 +308,17 @@ class Pumpkins(object):
         j = [j for j in self.jobs if j.name == name]
         return j[0] if j else None
 
+    def createJob(self, name):
+        self._server.create_job(name, jenkins.EMPTY_CONFIG_XML)
+        return self.job(name)
+
     @property
     def jobs(self):
-        if not self._jobs:
-            self._jobs = [Job(j, self._server) for j in self._server.get_jobs()]
-        return self._jobs
+        return [Job(j, self._server) for j in self._server.get_jobs()]
+    
+    @property
+    def allJobs(self):
+        return [Job(j, self._server) for j in self._server.get_all_jobs()]
 
     @property
     def me(self):
@@ -282,8 +333,9 @@ if __name__ == '__main__':
         print('Server initialization failed')
         exit(1)
 
-    def greetings():
-        return 'good %s' % ('morning' if datetime.datetime.now().hour < 13 else 'evening')
+    def greetings(user):
+        hour = datetime.datetime.now().hour
+        return 'good %s %s' % ('morning' if hour < 13 else 'evening', user)
 
-    print('Connection to server established, %s %s' % (greetings(), server.me))
-    exit(0)
+    print('Connection to server established, %s' % (greetings(server.me)))
+
