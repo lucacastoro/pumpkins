@@ -1,8 +1,8 @@
 # 🎃 Pumpkins
 Yet another Python API for Jenkins.  
-Buy one now, you get a Docker container FOR FREE!
+Buy one now, you get a Docker image FOR FREE!
 
-Build the container with (from the repo root directory):
+Build the image with (from the repo root directory):
 
 `docker build -f Dockerfile -t pumpkins .`
 
@@ -32,7 +32,7 @@ into the container file system so to be able to edit the .py file on the fly.
 Once logged into the container issuing `export PYTHONPATH=$PYTHONPATH:/staging` will save you from
 having to type `import sys; sys.append(...)` every time you spawn a `python`/`ipython` shell.
 
-The Docker image is built on top of the jenkins image (https://hub.docker.com/_/jenkins/) and as such
+The Docker image is built on top of the jenkins image (https://hub.docker.com/\_/jenkins/) and as such
 it exposes the 50000 and 8080 TCP ports, only the 8080 is needed to access the web interface so
 I would not bother exposing the 50000 as well.
 
