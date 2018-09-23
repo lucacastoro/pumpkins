@@ -26,7 +26,7 @@ In[3]: print(host.me)
 ...should do the work
 
 The Docker image is used only for developing/purpose testing, as such it makes little sense to embed
-the Python library itself into the container, more useful is mounting the repository root folder
+the Python library itself inside it, more useful is mounting the repository root folder
 into the container file system so to be able to edit the .py file on the fly.
 
 Once logged into the container issuing `export PYTHONPATH=$PYTHONPATH:/staging` will save you from
