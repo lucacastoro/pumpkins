@@ -30,7 +30,51 @@ class Parameter(object):
         return self.__str__()
 
 
+class Queue(object):
+
+    SLEEP_SECONDS = 1.0
+
+    def __init__(self, number, job, server):
+        self._number = number
+        self._job = job
+        self._server = server
+
+    @property
+    def _info(self):
+        return self._server.get_queue_item(self._number)
+
+    def wait(self):
+        while 'executable' not in self._info:
+            time.sleep(self.SLEEP_SECONDS)
+
+    @property
+    def id(self):
+        return _info['id']
+
+    @property
+    def stuck(self):
+        return _info['stuck']
+
+    @property
+    def blocked(self):
+        return _info['blocked']
+
+    @property
+    def buildable(self):
+        return _info['buildable']
+
+    @property
+    def build(self):
+        self.wait()
+        name = self._info['task']['name']
+        number = self._info['executable']['number']
+        b = self._server.get_build_info(name, number)
+        return Build(b, self._job, self._server)
+
+
 class Build(object):
+
+    SLEEP_SECONDS = 1.0
 
     __slots__ = ('_build', '_job', '_server')
 
@@ -76,6 +120,10 @@ class Build(object):
     @property
     def building(self):
         return self.info['building']
+
+    def wait(self):
+        while self.building:
+            time.sleep(self.SLEEP_SECONDS)
 
     @property
     def succeded(self):
@@ -257,7 +305,10 @@ class Job(object):
         args = {}
         for k, v in kwargs.iteritems():
             args[k] = v
-        return self._server.build_job(self.name, args)  # TODO: return Queue
+        return Queue(self._server.build_job(self.name, args), self, self._server)
+
+    def wait(self):
+        self.lastBuild.wait()
 
     def reconfig(self):
         self._server.reconfig_job(self.name)
@@ -541,14 +592,14 @@ class Tester(unittest.TestCase):
         job.configuration.builders.add('sleep 1')
 
         self.assertEqual(len(job.builds), 0)
-        job.build()
-        time.sleep(10)  # TODO: fixme with queues
+        queue = job.build()
+        queue.build.wait()
         self.assertEqual(len(job.builds), 1)
         self.assertTrue(job.lastBuild.succeded)
 
         job.configuration.builders[0] = 'false'
-        job.build()
-        time.sleep(10)  # TODO: fixme with queues
+        queue = job.build()
+        queue.build.wait()
         self.assertEqual(len(job.builds), 2)
         self.assertTrue(job.lastBuild.failed)
 
