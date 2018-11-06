@@ -13,7 +13,7 @@ Launch the container with:
 - Wait for Jenkins to startup and then access the instance at localhost:8080
 - Copy&Paste the password reported on the terminal into the Web page.
 - Proceed to configure Jenkins as needed.
-- Run `python /staging/pumpkins.py` to verify that everything is working properly.
+- In the container run `python /staging/pumpkins.py` to verify that everything is working properly.
 
 On the bash shell you have ipython and python-jenkins ready to be used,
 (as well as VIM, you're welcome) so doing...

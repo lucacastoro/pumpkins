@@ -4,9 +4,9 @@ import getpass
 import jenkins
 import re
 import xml.etree.ElementTree as XML
-import pdb
 
 # https://python-jenkins.readthedocs.io/en/latest/api.html
+
 
 class Parameter(object):
 
@@ -28,6 +28,7 @@ class Parameter(object):
 
     def __repr__(self):
         return self.__str__()
+
 
 class Build(object):
 
@@ -60,6 +61,87 @@ class Build(object):
     def delete(self):
         self._server.delete_build(self._job.name, self.number)
 
+    @property
+    def info(self):
+        return self._server.get_build_info(self._job.name, self.number)
+
+    @property
+    def env(self):
+        return self._server.get_build_env_vars(self._job.name, self.number)
+
+    @property
+    def report(self):
+        return self._server.get_build_test_report(self._job.name, self.number)
+
+    @property
+    def building(self):
+        return self.info['building']
+
+    @property
+    def succeded(self):
+        return self.info['result'] == u'SUCCESS'
+
+    @property
+    def failed(self):
+        return not self.succeded
+
+    @property
+    def url(self):
+        return self.info['url']
+
+    @property
+    def description(self):
+        desc =  self.info['description']
+        return desc if desc else ''
+
+    @property
+    def duration(self):
+        return datetime.timedelta(milliseconds=self.info['duration'])
+
+    @property
+    def estimatedDuration(self):
+        return datetime.timedelta(milliseconds=self.info['estimatedDuration'])
+
+    @property
+    def keepLog(self):
+        return self.info['keepLog']
+
+    @property
+    def time(self):
+        return datetime.datetime.fromtimestamp(self.info['timestamp']/1000)
+
+    def __str__(self):
+        return self.info['fullDisplayName']
+
+    def __repr__(self):
+        return self.__str__()
+
+
+class Builders(object):
+
+    def __init__(self, node, conf):
+        self._node = node
+        self._conf = conf
+
+    def __len__(self):
+        return len(self._node)
+
+    def add(self, script):
+        node = XML.Element('hudson.tasks.Shell')
+        comm = XML.Element('command')
+        comm.text = script
+        node.append(comm)
+        self._node.append(node)
+        self._conf._apply()
+
+    def __setitem__(self, key, value):
+        self._node[key].find('command').text = value
+        self._conf._apply()
+
+    def __iter__(self):
+        self.all().__iter__()
+
+
 class Configuration(object):
 
     __slots__ = ('_node', '_parent', '_header')
@@ -74,36 +156,63 @@ class Configuration(object):
         else:
             self._node = conf
 
-    def __getattr__(self, name):
-        child = [c for c in self._node if c.tag == name ]
-        if not child:
-            raise AttributeError('Attribute %s not found' % name)
-        return Configuration(child[0], self)
+    @property
+    def actions(self):
+        return []
 
-    def __setattr__(self, name, value):
-        if name in self.__slots__:
-            return object.__setattr__(self, name, value)
-        child = [c for c in self._node if c.tag == name ]
-        if not child:
-            raise AttributeError('Attribute %s not found' % name)
-        
-        child[0].text = str(value)
-        self._reconfigure()
+    @property
+    def description(self):
+        return self._node.find('description').text
 
-    def _reconfigure(self):
-        if isinstance(self._parent, Configuration):
-            self._parent._reconfigure()
-        else:
-            self._parent._apply(self)
+    @description.setter
+    def set_description(self, cb):
+        self._node.find('description').text = str(cb)
+        self._apply()
+
+    @property
+    def canRoam(self):
+        return bool(self._node.find('canRoam').text)
+
+    @canRoam.setter
+    def set_canRoam(self, cb):
+        self._node.find('canRoam').text = str(cb)
+        self._apply()
+
+    @property
+    def disabled(self):
+        return bool(self._find('disabled').text)
+
+    @disabled.setter
+    def set_disabled(self, cb):
+        self._node.find('disabled').text = str(cb)
+        self._apply()
+
+    @property
+    def concurrentBuild(self):
+        return bool(self._node.find('concurrentBuild').text)
+
+    @concurrentBuild.setter
+    def set_concurrentBuild(self, cb):
+        self._node.find('concurrentBuild').text = str(cb)
+        self._apply()
+
+    @property
+    def builders(self):
+        return Builders(self._node.find('builders'), self)
 
     def toXML(self):
         return self._header + XML.tostring(self._node)
 
+    def _apply(self):
+        self._parent._apply(self)
+
     def __str__(self):
-        return self._node.text
+        text = self._node.text
+        return text if text else ''
     
     def __repr__(self):
         return self.__str__()
+
 
 class Job(object):
 
@@ -137,10 +246,6 @@ class Job(object):
     def configuration(self):
         return Configuration(self._server.get_job_config(self.name), self)
 
-    @configuration.setter
-    def configuration(self, conf):
-        self._apply(conf)
-
     def _apply(self, conf):
         self._server.reconfig_job(self.name, conf.toXML())
 
@@ -152,9 +257,7 @@ class Job(object):
         args = {}
         for k, v in kwargs.iteritems():
             args[k] = v
-        # return self._server.build_job(self.name, args)  # TODO: return Build
-        num = self._server.build_job(self.name, args)
-        return [b for b in self.builds if b.number == num][0]
+        return self._server.build_job(self.name, args)  # TODO: return Queue
 
     def reconfig(self):
         self._server.reconfig_job(self.name)
@@ -251,9 +354,8 @@ class Job(object):
     @property
     def lastUnsuccessfulBuild(self):
         return self._get_build('lastUnsuccessfulBuild')
-    
-    # --
 
+    # --
     # -- configuration --
     # --
 
@@ -306,8 +408,33 @@ class Jobs(object):
         return self._server.jobs_count()
 
     def create(self, name):
-        self._server.create_job(name, jenkins.EMPTY_CONFIG_XML)
+
+        EmptyConfig = """
+        <project>
+            <description/>
+            <keepDependencies>false</keepDependencies>
+            <properties/>
+            <scm class="hudson.scm.NullSCM"/>
+            <canRoam>true</canRoam>
+            <disabled>false</disabled>
+            <blockBuildWhenDownstreamBuilding>false</blockBuildWhenDownstreamBuilding>
+            <blockBuildWhenUpstreamBuilding>false</blockBuildWhenUpstreamBuilding>
+            <triggers/>
+            <concurrentBuild>false</concurrentBuild>
+            <builders/>
+            <publishers/>
+            <buildWrappers/>
+        </project>
+        """
+
+        self._server.create_job(name, EmptyConfig)  # jenkins.EMPTY_CONFIG_XML)
         return self.__call__(name)
+
+    def __str__(self):
+        return "%d jobs" % self.__len__()
+
+    def __repr__(self):
+        return self.__str__()
 
 
 class User(object):
@@ -360,12 +487,13 @@ class Host(object):
 
         self._server = jenkins.Jenkins(url, username, password)
 
-
     def __bool__(self):  # 3.x
         try:
             self.me
             return True
-        except:
+        except ConnectionError:
+            return False
+        except JenkinsException:
             return False
 
     def __nonzero__(self):  # 2.x
@@ -380,17 +508,53 @@ class Host(object):
         return User(self._server.get_whoami())
 
 
+# Tests
+
+import pdb
+import time
+import unittest
+
+
+class Tester(unittest.TestCase):
+
+    @staticmethod
+    def connect():
+        hostname = 'http://localhost:8080'
+        username = 'admin'
+        password = 'admin'
+        return Host(hostname, username=username, password=password)
+
+    def test_connection(self):
+        host = self.connect()
+        self.assertTrue(host)
+
+    def test_job_lifecycle(self):
+        host = self.connect()
+        self.assertTrue(host)
+
+        name = 'asdasdasd'
+        self.assertTrue(name not in host.jobs)
+
+        job = host.jobs.create(name)
+        self.assertTrue(name in host.jobs)
+
+        job.configuration.builders.add('sleep 1')
+
+        self.assertEqual(len(job.builds), 0)
+        job.build()
+        time.sleep(10)  # TODO: fixme with queues
+        self.assertEqual(len(job.builds), 1)
+        self.assertTrue(job.lastBuild.succeded)
+
+        job.configuration.builders[0] = 'false'
+        job.build()
+        time.sleep(10)  # TODO: fixme with queues
+        self.assertEqual(len(job.builds), 2)
+        self.assertTrue(job.lastBuild.failed)
+
+        job.delete()
+        self.assertTrue(name not in host.jobs)
+
+
 if __name__ == '__main__':
-
-    host = Host('http://localhost:8080', username='admin', password='admin')
-
-    name = 'jhdgalfuyg'
-
-    assert(host)
-    assert(name not in host.jobs)
-    job = host.jobs.create(name)
-    assert(name in host.jobs)
-    job.concurrentBuild = True
-    for j in host.jobs:
-        print j
-    job.delete()
+    exit(unittest.main())
