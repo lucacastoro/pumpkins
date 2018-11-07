@@ -15,13 +15,10 @@ class Parameter(object):
     reType = re.compile('^(\w+)ParameterDefinition$')
 
     def __init__(self, param):
-        self.name = themparamap['name']
+        self.name = param['name']
         self.kind = Parameter.reType.match(param['type']).group(1).lower()
         self.description = param['description']
-        if 'defaultParameterValue' in param:
-            self.defaultValue = param['defaultParameterValue']['value']
-        else:
-            self.defaultValue = None
+        self.defaultValue = param['defaultParameterValue']['value'] if 'defaultParameterValue' in param else None
 
     def __str__(self):
         return self.name
@@ -34,34 +31,39 @@ class Queue(object):
 
     SLEEP_SECONDS = 1.0
 
+    __slots__ = ('_number', '_job', '_server', '_ready')
+
     def __init__(self, number, job, server):
         self._number = number
         self._job = job
         self._server = server
+        self._ready = False
 
     @property
     def _info(self):
         return self._server.get_queue_item(self._number)
 
     def wait(self):
-        while 'executable' not in self._info:
-            time.sleep(self.SLEEP_SECONDS)
+        if not self._ready:
+            while 'executable' not in self._info:
+                time.sleep(self.SLEEP_SECONDS)
+            self._ready = True
 
     @property
     def id(self):
-        return _info['id']
+        return self._info['id']
 
     @property
     def stuck(self):
-        return _info['stuck']
+        return self._info['stuck']
 
     @property
     def blocked(self):
-        return _info['blocked']
+        return self._info['blocked']
 
     @property
     def buildable(self):
-        return _info['buildable']
+        return self._info['buildable']
 
     @property
     def build(self):
@@ -76,12 +78,13 @@ class Build(object):
 
     SLEEP_SECONDS = 1.0
 
-    __slots__ = ('_build', '_job', '_server')
+    __slots__ = ('_build', '_job', '_server', '_complete')
 
     def __init__(self, build, job, server):
         self._build = build
         self._job = job
         self._server = server
+        self._complete = None
 
     @property
     def number(self):
@@ -122,12 +125,19 @@ class Build(object):
         return self.info['building']
 
     def wait(self):
-        while self.building:
-            time.sleep(self.SLEEP_SECONDS)
+        if not self._complete:
+            while self.building:
+                time.sleep(self.SLEEP_SECONDS)
+            self._complete = True
+
+    @property
+    def result(self):
+        self.wait()
+        return self.info['result']
 
     @property
     def succeded(self):
-        return self.info['result'] == u'SUCCESS'
+        return self.result == 'SUCCESS'
 
     @property
     def failed(self):
@@ -144,6 +154,7 @@ class Build(object):
 
     @property
     def duration(self):
+        self.wait()
         return datetime.timedelta(milliseconds=self.info['duration'])
 
     @property
@@ -165,7 +176,7 @@ class Build(object):
         return self.__str__()
 
 
-class Builders(object):
+class BuildSteps(object):
 
     def __init__(self, node, conf):
         self._node = node
@@ -245,8 +256,8 @@ class Configuration(object):
         self._apply()
 
     @property
-    def builders(self):
-        return Builders(self._node.find('builders'), self)
+    def buildSteps(self):
+        return BuildSteps(self._node.find('builders'), self)
 
     def toXML(self):
         return self._header + XML.tostring(self._node)
@@ -301,11 +312,14 @@ class Job(object):
         self._server.copy_job(self.name, newname)
         return Job(self._server.get_job(newname))
 
-    def build(self, **kwargs):
+    def schedule(self, **kwargs):
         args = {}
         for k, v in kwargs.iteritems():
             args[k] = v
         return Queue(self._server.build_job(self.name, args), self, self._server)
+
+    def build(self, **kwargs):
+        return self.schedule(**kwargs).build
 
     def wait(self):
         self.lastBuild.wait()
@@ -561,7 +575,6 @@ class Host(object):
 
 # Tests
 
-import pdb
 import time
 import unittest
 
@@ -589,23 +602,22 @@ class Tester(unittest.TestCase):
         job = host.jobs.create(name)
         self.assertTrue(name in host.jobs)
 
-        job.configuration.builders.add('sleep 1')
+        job.configuration.buildSteps.add('true')
 
         self.assertEqual(len(job.builds), 0)
-        queue = job.build()
-        queue.build.wait()
+        queue = job.schedule()
+        queue.wait()  # wait for the job to start
+        queue.build.wait()  # wait for the job to finish
         self.assertEqual(len(job.builds), 1)
         self.assertTrue(job.lastBuild.succeded)
 
-        job.configuration.builders[0] = 'false'
-        queue = job.build()
-        queue.build.wait()
+        job.configuration.buildSteps[0] = 'false'
+        self.assertTrue(job.build().failed)
         self.assertEqual(len(job.builds), 2)
-        self.assertTrue(job.lastBuild.failed)
 
         job.delete()
         self.assertTrue(name not in host.jobs)
 
 
 if __name__ == '__main__':
-    exit(unittest.main())
+    unittest.main()
