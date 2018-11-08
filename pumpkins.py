@@ -400,102 +400,150 @@ class Configuration(object):
 
 class Job(object):
 
+    """Da Job"""
+
     __slots__ = ('_job', '_server')
 
     def __init__(self, job, server):
+        """c'tor
+        :param job, dict, a dictionary as returned by jenkins.Jenkins.get_jobs()
+        :param server, jenkins.Jenkins, the owner server instance"""
         self._job = job
         self._server = server
 
     @property
     def kind(self):
+        """the kind of job
+        :return str"""
         return self._job['_class']
 
     @property
     def name(self):
+        """the name of the job
+        :return str"""
         return self._job['name']
 
     @property
     def url(self):
+        """the url of the job
+        :return str"""
         return self._job['url']
 
     @property
     def color(self):
+        """the 'color' of the job
+        :return str"""
         return self._job['color']
 
     @property
     def fullname(self):
+        """the full name of the job
+        :return str"""
         return self._job['fullname']
 
     @property
-    def configuration(self):
+    def _configuration(self):
+        """the local representation of this job configuration
+        :return Configuration"""
         return Configuration(self._server.get_job_config(self.name), self)
 
     def _apply(self, conf):
+        """propagate to the server the given configuration
+        :param conf, Configuration, the configuration to apply"""
         self._server.reconfig_job(self.name, conf.toXML())
 
     def copy(self, newname):
+        """create a new job using the current one as a template
+        :param newname, str, the name of the new job
+        :return Job, the new job instance"""
         self._server.copy_job(self.name, newname)
         return Job(self._server.get_job(newname))
 
     def schedule(self, **kwargs):
+        """schedule a job execution
+        :param kwargs, a dictionary that will be used to configure the parameters of the build
+        :return Queue, the instance of the enqueued object"""
         args = {}
         for k, v in kwargs.iteritems():
             args[k] = v
         return Queue(self._server.build_job(self.name, args), self, self._server)
 
     def build(self, **kwargs):
+        """schedule a job execution and wait for the build to start
+        :param kwargs, a dictionary that will be used to configure the parameters of the build
+        :return Build, the build for that job"""
         return self.schedule(**kwargs).build
 
     def wait(self):
+        """wait for the job last build to complete"""
         self.lastBuild.wait()
 
-    def reconfig(self):
-        self._server.reconfig_job(self.name)
-
     def enable(self):
+        """enable this job"""
         self._server.enable_job(self.name)
 
     def disable(self):
+        """disable this job"""
         self._server.disable_job(self.name)
 
     def delete(self):
+        """delete this job from the server"""
         self._server.delete_job(self.name)
 
     # -- info --
     
     @property
     def _info(self):
+        """fetch the job informations from the server
+        :return dict"""
         return self._server.get_job_info(self.name)
     
     @property
     def description(self):
+        """the job description
+        :return str"""
         return self._info['description']
 
     @property
     def buildable(self):
+        """is the job buildable
+        :return bool"""
         return self._info['buildable']
 
     @property
     def inQueue(self):
+        """is the job in a queue
+        :return bool"""
         return self._info['inQueue']
 
     @property
     def keepDependencies(self):
+        """should the job keep its dependencies
+        :return bool"""
         return self._info['keepDependencies']
 
     @property
     def nextBuildNumber(self):
+        """the next build number
+        :return int"""
         return self._info['lastBuildNumber']
 
     @property
     def concurentBuild(self):
+        """is concurrent build enabled for this job
+        :return bool"""
         return self._info['concurrentBuild']
 
     @property
     def builds(self):
+        """the builds for this job
+        :return list(Build)"""
         return [Build(b, self, self._server) for b in self._info['builds']]
 
     def _get_build(self, name):
+        """utility function to retrieve a specific build for this job
+        :param name, the name of the build
+        :return Build|None"""
         build = self._info[name]
         if not build:
             return None
@@ -504,14 +552,20 @@ class Job(object):
 
     @property
     def firstBuild(self):
+        """the very first build from this job
+        :return Build"""
         return self._get_build('firstBuild')
 
     @property
     def lastBuild(self):
+        """the last build for this job
+        :return Build"""
         return self._get_build('lastBuild')
 
     @property
     def parameters(self):
+        """the parameters of this job
+        :return list(Parameter)"""
         prop = self._info['property']
         if not prop:
             return []
@@ -523,42 +577,53 @@ class Job(object):
         
     @property
     def lastCompletedBuild(self):
+        """the last completed build
+        :return Build"""
         return self._get_build('lastCompletedBuild')
 
     @property
     def lastFailedBuild(self):
+        """the last failed build
+        :return Build"""
         return self._get_build('lastFiledBuild')
 
     @property
     def lastStableBuild(self):
+        """the last stable build
+        :return Build"""
         return self._get_build('lastStableBuild')
 
     @property
     def lastUnstableBuild(self):
+        """the last unstable build
+        :return Build"""
         return self._get_build('lastUnstableBuild')
 
     @property
     def lastSuccessfulBuild(self):
+        """last successful build
+        :return Build"""
         return self._get_build('lastSuccessfulBuild')
 
     @property
     def lastUnsuccessfulBuild(self):
+        """last unsuccessful build
+        :return Build"""
         return self._get_build('lastUnsuccessfulBuild')
 
-    # --
     # -- configuration --
-    # --
+    # here we forward the job attributes to the underlying Configuration
 
     def __getattr__(self, name):
-        if hasattr(self.configuration, name):
-            return getattr(self.configuration, name)
+        if hasattr(self._configuration, name):
+            return getattr(self._configuration, name)
         raise AttributeError('Attribute %s not found' % name)
 
     def __setattr__(self, name, value):
         if name in self.__slots__:
             return object.__setattr__(self, name, value)
-        if hasattr(self.configuration, name):
-            setattr(self.configuration, name, value)
+        if hasattr(self._configuration, name):
+            setattr(self._configuration, name, value)
 
     def __str__(self):
         return self.name
@@ -568,37 +633,54 @@ class Job(object):
 
 
 class Jobs(object):
-    
+
+    """This is a Jobs container"""
+
     __slots__ = ('_server', '_jobs')
     
     def __init__(self, server):
+        """c'tor
+        :param server, jenkins.Jenkins, the owner server instance"""
         self._server = server
         self._jobs = [Job(j, server) for j in self._server.get_jobs()]
     
-    def __contains__(self, job):
-        return bool(self._server.job_exists(job))
+    def __contains__(self, name):
+        return bool(self._server.job_exists(name))
     
-    def __getitem__(self, key):
-        return self._jobs[key]
+    def __getitem__(self, index):
+        """access to the jobs by index
+        :param index, int, the index
+        :return Job"""
+        return self._jobs[index]
     
     def __iter__(self):
         return self._jobs.__iter__()
     
     def __call__(self, name):
-        j = self._server.get_job_info(name)
-        return None if not j else Job({
-            '_class': j['_class'],
-            'color': j['color'],
-            'fullname': j['fullName'],
-            'name': j['name'],
-            'url': j['url'],
-        }, self._server)
+        """access the job by name
+        :param name, str, the job name
+       :return Job or None"""
+#       j = self._server.get_job_info(name)
+#       return None if not j else Job({
+#           '_class': j['_class'],
+#           'color': j['color'],
+#           'fullname': j['fullName'],
+#           'name': j['name'],
+#           'url': j['url'],
+#       }, self._server)
+        j = [job for job in self._jobs if job.name == name]
+        return j[0] if j else None
 
     def __len__(self):
-        return self._server.jobs_count()
+#       return self._server.jobs_count()
+        return len(self._jobs)
 
     def create(self, name):
+        """create a new job using an empty configuraion as a template
+        :param name, str, the name of the new job
+        :return Job, the newly created job"""
         self._server.create_job(name, jenkins.EMPTY_CONFIG_XML)
+        self._jobs = [Job(j, server) for j in self._server.get_jobs()]
         return self.__call__(name)
 
     def __str__(self):
@@ -610,29 +692,43 @@ class Jobs(object):
 
 class User(object):
 
+    """An user"""
+
     __slots__ = ('_user')
 
     def __init__(self, user):
+        """c'tor
+        :param user, dict, as returned by jenkins.Jenkins.get_whoami()"""
         self._user = user
 
     @property
     def fullName(self):
+        """the user full name
+        :return str"""
         return self._user['fullName']
 
     @property
     def name(self):
+        """the user name
+        :return str"""
         return self.fullName
 
     @property
     def id(self):
+        """the user unique id
+        :return int"""
         return self._user['id']
 
     @property
     def description(self):
+        """the user description
+        :return str"""
         return self._user['description']
 
     @property
     def url(self):
+        """the url to the user web page
+        :return str"""
         return self._user['absoluteUrl']
 
     def __str__(self):
@@ -644,9 +740,15 @@ class User(object):
 
 class Host(object):
 
+    """The Jenkins server"""
+
     __slots__ = ('_server')
 
     def __init__(self, url, username=None, password=None):
+        """c'tor, perform the connection to the server
+        :param url, str, the url to the server
+        :param username, str, the username to use for the authentication
+        :param password, str, the password to use for the authentication"""
 
         if not username:
             sys.stdout.write('Username: ')
@@ -659,6 +761,8 @@ class Host(object):
         self._server = jenkins.Jenkins(url, username, password)
 
     def __bool__(self):  # 3.x
+        """check for the server validity (connection established)
+        :return bool, True if the server is connected, false otherwise"""
         try:
             self.me
             return True
@@ -668,14 +772,19 @@ class Host(object):
             return False
 
     def __nonzero__(self):  # 2.x
+        """see __bool__()"""
         return self.__bool__()
 
     @property
     def jobs(self):
+        """the jobs configured on this server
+        :return Jobs"""
         return Jobs(self._server)
     
     @property
     def me(self):
+        """the current user
+        :return User"""
         return User(self._server.get_whoami())
 
 
@@ -708,7 +817,7 @@ class Tester(unittest.TestCase):
         job = host.jobs.create(name)
         self.assertTrue(name in host.jobs)
 
-        job.configuration.buildSteps.add('true')
+        job._configuration.buildSteps.add('true')
 
         self.assertEqual(len(job.builds), 0)
         queue = job.schedule()
@@ -717,7 +826,7 @@ class Tester(unittest.TestCase):
         self.assertEqual(len(job.builds), 1)
         self.assertTrue(job.lastBuild.succeded)
 
-        job.configuration.buildSteps[0] = 'false'
+        job._configuration.buildSteps[0] = 'false'
         self.assertTrue(job.build().failed)
         self.assertEqual(len(job.builds), 2)
 
