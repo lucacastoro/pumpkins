@@ -275,6 +275,10 @@ class BuildSteps(object):
         :return int"""
         return len(self._node)
 
+    def _apply(self):
+        """utility function, propagate the change to the parent entity"""
+        self._conf._apply()
+
     def add(self, script):
         """add a script to be executed by the job
         :param script, str, the shell script to execute"""
@@ -283,14 +287,36 @@ class BuildSteps(object):
         comm.text = script
         node.append(comm)
         self._node.append(node)
-        self._conf._apply()
+        self._apply()
+
+    def __getitem__(self, index):
+        """retrieve a specific step's script
+        :param index, int, the index of the step to set
+        :return str, the script assigned to the step"""
+        return self._node[index].find('command').text
 
     def __setitem__(self, index, value):
         """sets a specific step
         :param index, int, the index of the step to set
         :param value, str, the script to assign to the step"""
         self._node[index].find('command').text = value
-        self._conf._apply()
+        self._apply()
+
+    def __delitem__(self, index):
+        """remove a build step from the list
+        :param index, int, the index of the step to remove"""
+        self._node.remove(self._node[index])
+        self._apply()
+
+    def __str__(self):
+        if 0 == self.__len__():
+            return 'no build steps'
+        if 1 == self.__len__():
+            return self.__getitem__(0)
+        return "%d steps" % self.__len__()
+
+    def __repr__(self):
+        return self.__str__()
 
 
 class Configuration(object):
@@ -680,7 +706,7 @@ class Jobs(object):
         :param name, str, the name of the new job
         :return Job, the newly created job"""
         self._server.create_job(name, jenkins.EMPTY_CONFIG_XML)
-        self._jobs = [Job(j, server) for j in self._server.get_jobs()]
+        self._jobs = [Job(j, self._server) for j in self._server.get_jobs()]
         return self.__call__(name)
 
     def __str__(self):
@@ -820,18 +846,29 @@ class Tester(unittest.TestCase):
         job._configuration.buildSteps.add('true')
 
         self.assertEqual(len(job.builds), 0)
+        a = datetime.datetime.now()
         queue = job.schedule()
+        b = datetime.datetime.now()
         queue.wait()  # wait for the job to start
+        c = datetime.datetime.now()
         queue.build.wait()  # wait for the job to finish
+        d = datetime.datetime.now()
+
+        print('schedule: %s' % (b - a))
+        print('queue.wait: %s' % (c - b))
+        print('build.wait: %s' % (d - c))
+
         self.assertEqual(len(job.builds), 1)
-        self.assertTrue(job.lastBuild.succeded)
+        self.assertTrue(job.lastBuild.succeed)
+
+        print(job.lastBuild.duration)
 
         job._configuration.buildSteps[0] = 'false'
         self.assertTrue(job.build().failed)
         self.assertEqual(len(job.builds), 2)
 
-        job.delete()
-        self.assertTrue(name not in host.jobs)
+#       job.delete()
+#       self.assertTrue(name not in host.jobs)
 
 
 if __name__ == '__main__':
