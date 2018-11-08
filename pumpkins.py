@@ -10,6 +10,8 @@ import xml.etree.ElementTree as XML
 
 class Parameter(object):
 
+    """Represents a configurable build parameter"""
+
     __slots__ = ('name', 'kind', 'description', 'defaultValue')
 
     reType = re.compile('^(\w+)ParameterDefinition$')
@@ -29,6 +31,16 @@ class Parameter(object):
 
 class Queue(object):
 
+    """When a job is 'executed' is not immediately started, instead it is 'queued' for a short time (usually ~5sec)
+    before being assigned to a node for the actual execution.
+    This class represents this 'Queue' intermediate state, from where you can access the associated (to be spawn)
+    build process, or cancel.
+    The 'queue' object itself has a short lifespan (~5min), from the 'server.build_job()' documentation:
+     > This method returns a queue item number that you can pass to Jenkins.get_queue_item().
+     > Note that this queue number is only valid for about five minutes after the job completes,
+     > so you should get/poll the queue information as soon as possible to determine the job's URL.
+    """
+
     SLEEP_SECONDS = 1.0
 
     __slots__ = ('_number', '_job', '_server', '_ready')
@@ -41,9 +53,12 @@ class Queue(object):
 
     @property
     def _info(self):
+        """accesses the underlying queue informations
+        :return dict"""
         return self._server.get_queue_item(self._number)
 
     def wait(self):
+        """wait for the related build process to start"""
         if not self._ready:
             while 'executable' not in self._info:
                 time.sleep(self.SLEEP_SECONDS)
@@ -51,36 +66,62 @@ class Queue(object):
 
     @property
     def id(self):
+        """the queue id
+        :return int"""
         return self._info['id']
 
     @property
     def stuck(self):
+        """the queue is stuck
+        :return bool"""
         return self._info['stuck']
 
     @property
     def blocked(self):
+        """the queue is blocked
+        :return bool"""
         return self._info['blocked']
 
     @property
     def buildable(self):
+        """the queue is buildable
+        :return bool"""
         return self._info['buildable']
 
     @property
     def build(self):
+        """the associated build process
+        if the build process is not yet started when this method is called,
+        the current thread will be paused until is not started
+        :return Build"""
         self.wait()
         name = self._info['task']['name']
         number = self._info['executable']['number']
         b = self._server.get_build_info(name, number)
         return Build(b, self._job, self._server)
 
+    def cancel(self):
+        """cnacel a scheduled (but not yet started) build process"""
+        self._server.cancel_queue(self.id)
+
 
 class Build(object):
+
+    """Represents job build process.
+    A Build can be ongoing (.building = True) or completed, some of the informations related to a Build will be
+    available only when the build process is complete, as the build duration, the build result and so on.
+    """
 
     SLEEP_SECONDS = 1.0
 
     __slots__ = ('_build', '_job', '_server', '_complete')
 
     def __init__(self, build, job, server):
+        """c'tor
+        :param build, dict, a dictionary containing the build information, returned by server.get_build_info()
+        :param job, Job, the parent Job
+        :param server, jenkins.Jenkins, the root server instance
+        """
         self._build = build
         self._job = job
         self._server = server
@@ -88,43 +129,62 @@ class Build(object):
 
     @property
     def number(self):
+        """the build number
+        :return int"""
         return self._build['number']
 
     @property
     def url(self):
+        """the build url
+        :return str"""
         return self._build['url']
 
     @property
     def kind(self):
+        """the build type
+        :return str"""
         return self._build['_class']
     
     @property
     def output(self):
+        """the build console output
+        :return str"""
         return self._server.get_build_console_output(self._job.name, self.number)
 
     def stop(self):
+        """stop a running build process"""
         self._server.stop_build(self._job.name, self.number)
     
     def delete(self):
+        """delete a build"""
         self._server.delete_build(self._job.name, self.number)
 
     @property
-    def info(self):
+    def _info(self):
+        """the build info structure
+        :return dict"""
         return self._server.get_build_info(self._job.name, self.number)
 
     @property
     def env(self):
+        """the build environment variables map
+        :return dict"""
         return self._server.get_build_env_vars(self._job.name, self.number)
 
     @property
-    def report(self):
+    def testReport(self):
+        """the build test reports
+        :return dict"""
         return self._server.get_build_test_report(self._job.name, self.number)
 
     @property
     def building(self):
-        return self.info['building']
+        """the build is in progress
+        :return bool"""
+        return self._info['building']
 
     def wait(self):
+        """wait for the build to complete"""
         if not self._complete:
             while self.building:
                 time.sleep(self.SLEEP_SECONDS)
@@ -132,45 +192,67 @@ class Build(object):
 
     @property
     def result(self):
+        """the build process result
+        This method waits for the build process to complete if necessary
+        :return str"""
         self.wait()
-        return self.info['result']
+        return self._info['result']
 
     @property
-    def succeded(self):
+    def succeed(self):
+        """the build process was successful
+        This method waits for the build process to complete if necessary
+        :return bool"""
         return self.result == 'SUCCESS'
 
     @property
     def failed(self):
-        return not self.succeded
+        """the build process failed
+        This method waits for the build process to complete if necessary
+        :return bool"""
+        return not self.succeed
 
     @property
     def url(self):
-        return self.info['url']
+        """the build url
+        :return str"""
+        return self._info['url']
 
     @property
     def description(self):
-        desc =  self.info['description']
+        """the build description
+        :return str"""
+        desc = self._info['description']
         return desc if desc else ''
 
     @property
     def duration(self):
+        """the build process time duration
+        This method waits for the build process to complete if necessary
+        :return timedelta"""
         self.wait()
-        return datetime.timedelta(milliseconds=self.info['duration'])
+        return datetime.timedelta(milliseconds=self._info['duration'])
 
     @property
     def estimatedDuration(self):
-        return datetime.timedelta(milliseconds=self.info['estimatedDuration'])
+        """the build process estimated duration
+        :return timedelta"""
+        return datetime.timedelta(milliseconds=self._info['estimatedDuration'])
 
     @property
     def keepLog(self):
-        return self.info['keepLog']
+        """the logs should be kept
+        :return bool"""
+        return self._info['keepLog']
 
     @property
     def time(self):
-        return datetime.datetime.fromtimestamp(self.info['timestamp']/1000)
+        """the build start time
+        :return datetime"""
+        return datetime.datetime.fromtimestamp(self._info['timestamp'] / 1000)
 
     def __str__(self):
-        return self.info['fullDisplayName']
+        return self._info['fullDisplayName']
 
     def __repr__(self):
         return self.__str__()
@@ -178,14 +260,24 @@ class Build(object):
 
 class BuildSteps(object):
 
+    """The jobs consist of a number of parameters and a sequence of build steps.
+    This class represents a sequence of build steps"""
+
     def __init__(self, node, conf):
+        """c'tor
+        :param node, XML.Node, the <builders> node in the job configuration"""
+        assert (node.tag == 'builders')
         self._node = node
         self._conf = conf
 
     def __len__(self):
+        """the number of steps for this configuration
+        :return int"""
         return len(self._node)
 
     def add(self, script):
+        """add a script to be executed by the job
+        :param script, str, the shell script to execute"""
         node = XML.Element('hudson.tasks.Shell')
         comm = XML.Element('command')
         comm.text = script
@@ -193,77 +285,110 @@ class BuildSteps(object):
         self._node.append(node)
         self._conf._apply()
 
-    def __setitem__(self, key, value):
-        self._node[key].find('command').text = value
+    def __setitem__(self, index, value):
+        """sets a specific step
+        :param index, int, the index of the step to set
+        :param value, str, the script to assign to the step"""
+        self._node[index].find('command').text = value
         self._conf._apply()
-
-    def __iter__(self):
-        self.all().__iter__()
 
 
 class Configuration(object):
 
-    __slots__ = ('_node', '_parent', '_header')
+    """Every job is described by a complex XML configuration document,
+    this class tries to ease the manipulation of such XML document.
+    You can see the job configuration document at:
+        http[s]://[hostname]/job/[jobname]/config.xml
+    To change a job parameter you have to reissue the whole configuration to the server,
+    this is done through the ._apply() method, that's implicitly called whenever one field of this class is modified.
+    """
+
+    __slots__ = ('_node', '_job', '_header')
 
     _header = "<?xml version='1.0' encoding='UTF-8'?>\n"
 
-    def __init__(self, conf, parent):
-        self._parent = parent
-        if isinstance(conf, unicode):
-            self._node = XML.fromstring(conf)
-            assert(self._node.tag == 'project')
-        else:
-            self._node = conf
+    def __init__(self, conf, job):
+        """c'tor
+        :param conf, str, the configuration document content as XML
+        :param job, Job, the parent job instance"""
+        self._job = job
+        self._node = XML.fromstring(conf)
+        assert(self._node.tag == 'project')
 
     @property
     def actions(self):
-        return []
+        raise NotImplementedError()
+
+    def _set(self, name, value):
+        """utility function used to ease propagating changes to the owner job
+        :param name, str, the field to change in this configuration
+        :param value, object, the new value of that field"""
+        self._node.find(name).text = str(value)
+        self._apply()
 
     @property
     def description(self):
+        """the job description
+        :return str"""
         return self._node.find('description').text
 
     @description.setter
     def set_description(self, cb):
-        self._node.find('description').text = str(cb)
-        self._apply()
+        """set the job description
+        :param cb, str, the description"""
+        self._set('description', cb)
 
     @property
     def canRoam(self):
+        """the job can roam
+        :return bool"""
         return bool(self._node.find('canRoam').text)
 
     @canRoam.setter
     def set_canRoam(self, cb):
-        self._node.find('canRoam').text = str(cb)
-        self._apply()
+        """set the roaming of the job
+        :param cb, bool, the job roaming"""
+        self._set('canRoam', cb)
 
     @property
     def disabled(self):
+        """the job is disabled
+        :return bool"""
         return bool(self._find('disabled').text)
 
     @disabled.setter
     def set_disabled(self, cb):
-        self._node.find('disabled').text = str(cb)
-        self._apply()
+        """set if the job is disabled
+        :param cb, bool, the job is disabled or not"""
+        self._set('disabled', cb)
 
     @property
     def concurrentBuild(self):
+        """the job is can be ran concurrently
+        :return bool"""
         return bool(self._node.find('concurrentBuild').text)
 
     @concurrentBuild.setter
     def set_concurrentBuild(self, cb):
-        self._node.find('concurrentBuild').text = str(cb)
-        self._apply()
+        """set if the job is can be ran concurrently
+        :param cb, bool, ..."""
+        self._set('concurrentBuild', cb)
 
     @property
     def buildSteps(self):
+        """the job build steps
+        :return BuildSteps"""
         return BuildSteps(self._node.find('builders'), self)
 
     def toXML(self):
+        """string representing the XML content of this configuration
+        :return str"""
         return self._header + XML.tostring(self._node)
 
     def _apply(self):
-        self._parent._apply(self)
+        """notify the related Job instance that something has changed in this configuration, the job will take
+        care of propagating the change to the server, eventually invoking .toXML()"""
+        self._job._apply(self)
 
     def __str__(self):
         text = self._node.text
@@ -473,26 +598,7 @@ class Jobs(object):
         return self._server.jobs_count()
 
     def create(self, name):
-
-        EmptyConfig = """
-        <project>
-            <description/>
-            <keepDependencies>false</keepDependencies>
-            <properties/>
-            <scm class="hudson.scm.NullSCM"/>
-            <canRoam>true</canRoam>
-            <disabled>false</disabled>
-            <blockBuildWhenDownstreamBuilding>false</blockBuildWhenDownstreamBuilding>
-            <blockBuildWhenUpstreamBuilding>false</blockBuildWhenUpstreamBuilding>
-            <triggers/>
-            <concurrentBuild>false</concurrentBuild>
-            <builders/>
-            <publishers/>
-            <buildWrappers/>
-        </project>
-        """
-
-        self._server.create_job(name, EmptyConfig)  # jenkins.EMPTY_CONFIG_XML)
+        self._server.create_job(name, jenkins.EMPTY_CONFIG_XML)
         return self.__call__(name)
 
     def __str__(self):
