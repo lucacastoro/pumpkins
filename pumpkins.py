@@ -8,6 +8,142 @@ import xml.etree.ElementTree as XML
 # https://python-jenkins.readthedocs.io/en/latest/api.html
 
 
+class Node(object):
+
+    """A working node"""
+
+    __slots__ = ('_node', '_server')
+
+    def __init__(self, node, server):
+        """c'tor
+        :param node, dict, as return by jenkins.Jenkins.get_nodes()
+        ;paran server, jenkins.Jenkins, the owner server"""
+        self._node = node
+        self._server = server
+
+    @property
+    def name(self):
+        """the node name
+        :return str"""
+        return self._node['name']
+
+    @property
+    def offline(self):
+        """the node is offline
+        :return bool"""
+        return self._node['offline']
+
+    @property
+    def online(self):
+        """the node is online
+        :return bool"""
+        return not self.offline
+
+    @property
+    def _info(self):
+        """return detailed info of this node
+        [NOT WORKING]
+        :return dict
+        """
+        return self._server.get_node_info(self.name)
+
+    @property
+    def _config(self):
+        """return the specific configuration for this node
+        [NOT WORKING]
+        :return dict
+        """
+        return self._server.get_node_config(self.name)
+
+    def reconfig(self, conf):
+        """applies a configuration to this node
+        :param conf, str, the configuration to apply"""
+        self._server.reconfig_node(self.name, conf)
+
+    def run(self, script):
+        """executes a Groovy script on the node
+        [NOT WORKING]
+        :param script, str, the script to execute
+        :return str, the command output"""
+        return self._server.run_script(script, self.name)
+
+    def disable(self):
+        """disable this node"""
+        self._server.disable_node(self.name)
+
+    def enable(self):
+        """enable this node"""
+        self._server.enable_node(self.name)
+
+    def delete(self):
+        """delete this node"""
+        self._server.delete_node(self.name)
+
+    def __str__(self):
+        return self.name
+
+    def __repr__(self):
+        return self.__str__()
+
+
+class Nodes(object):
+
+    """The container for the compute nodes on the server"""
+
+    __slots__ = ('_nodes', '_server')
+
+    def __init__(self, server):
+        """c'tor
+        :param server, jenkins.jenkins, the owner server instance"""
+        self._server = server
+        self._nodes = [Node(n, server) for n in self._server.get_nodes()]
+
+    def __iter__(self):
+        return self._nodes.__iter__()
+
+    def __contains__(self, name):
+        """checl if a node with the given name exists
+        :param name, str, the node name
+        :return bool"""
+        # return self._server.node_exists(name)
+        return True if self(name) else False
+
+    def __getitem__(self, index):
+        """return a node by index
+        :param index, int, the index of the node
+        :return Node"""
+        return self._nodes[index]
+
+    def __call__(self, name):
+        """return a node by name, or None
+        :param name, str, the name of the node
+        :return Node|None"""
+        n = [n for n in self._nodes if n.name == name]
+        return n[0] if n else None
+
+    def __len__(self):
+        """the number of nodes availabe
+        :return int"""
+        return len(self._nodes)
+
+    def create(self, name):
+        """create a new node
+        :param name, str, the name of the new node
+        :return Node, the node instance just created"""
+        self._server.create_node(name)
+        return self('name')
+
+    def __str__(self):
+        if 0 == len(self):
+            return 'no nodes'
+        if 1 == len(self):
+            return str(self[0])
+        return '%d nodes' % len(self)
+
+    def __repr__(self):
+        return self.__str__()
+
+
 class Parameter(object):
 
     """Represents a configurable build parameter"""
@@ -806,12 +942,26 @@ class Host(object):
         """the jobs configured on this server
         :return Jobs"""
         return Jobs(self._server)
-    
+
+    @property
+    def nodes(self):
+        """the nodes available on this server
+        :return Nodes"""
+        return Nodes(self._server)
+
     @property
     def me(self):
         """the current user
         :return User"""
         return User(self._server.get_whoami())
+
+    def quietDown(self):
+        """prepare Jenkins for shutdown."""
+        self._server.quiet_down()
+
+    def waitForNormalOp(self):
+        """wait for jenkins to enter normal operation mode"""
+        self._server.wait_for_normal_op()
 
 
 # Tests
@@ -867,8 +1017,8 @@ class Tester(unittest.TestCase):
         self.assertTrue(job.build().failed)
         self.assertEqual(len(job.builds), 2)
 
-#       job.delete()
-#       self.assertTrue(name not in host.jobs)
+        job.delete()
+        self.assertTrue(name not in host.jobs)
 
 
 if __name__ == '__main__':
