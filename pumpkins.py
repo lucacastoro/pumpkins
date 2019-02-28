@@ -582,7 +582,8 @@ class Configuration(object):
     def toXML(self):
         """string representing the XML content of this configuration
         :return str"""
-        return self._xmlheader + XML.tostring(self._node)
+        encoding = 'utf-8'
+        return self._xmlheader + XML.tostring(self._node).decode(encoding)
 
     def _apply(self):
         """notify the related Job instance that something has changed in this configuration, the job will take
@@ -663,7 +664,7 @@ class Job(object):
         :param kwargs, a dictionary that will be used to configure the parameters of the build
         :return Queue, the instance of the enqueued object"""
         args = {}
-        for k, v in kwargs.iteritems():
+        for k, v in kwargs.items():
             args[k] = v
         return Queue(self._server.build_job(self.name, args), self, self._server)
 
@@ -1037,11 +1038,17 @@ if __name__ == '__main__':
             host = self.connect()
             self.assertTrue(host)
     
+        def test_user(self):
+            host = self.connect()
+            self.assertEqual(host.me.name, 'admin')
+    
         def test_job_lifecycle(self):
             host = self.connect()
             self.assertTrue(host)
     
             name = 'asdasdasd'
+            if host.job(name):
+                host.job(name).delete()
             self.assertTrue(name not in host.jobs())
     
             job = host.createJob(name)
@@ -1069,10 +1076,10 @@ if __name__ == '__main__':
             print(job.lastBuild.duration)
     
             job._configuration.buildSteps[0] = 'false'
-            self.assertTrue(job.build().failed)
+            self.assertTrue(job.start().failed)
             self.assertEqual(len(job.builds), 2)
     
             job.delete()
-            self.assertTrue(name not in host.jobs)
+            self.assertTrue(name not in host.jobs())
 
     unittest.main()

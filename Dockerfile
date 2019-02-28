@@ -1,13 +1,10 @@
 FROM jenkins/jenkins:latest
 USER root
-RUN apt-get update && apt-get -y install python-pip vim
-ENV HOME=/home/jenkins
-RUN mkdir -p ${HOME}
-COPY start-jenkins.sh ${HOME}/
-RUN chmod +x ${HOME}/start-jenkins.sh
-RUN chown -R jenkins:jenkins ${HOME}
+RUN apt-get update && apt-get -y install python3-pip vim
 RUN passwd -d root
+RUN pip3 install ipython python-jenkins
+COPY start.sh /usr/share/jenkins/start.sh
+RUN chmod +x /usr/share/jenkins/start.sh
+RUN chown -R jenkins:jenkins /usr/share/jenkins
 USER jenkins
-RUN pip install ipython python-jenkins
-WORKDIR ${HOME}
-ENTRYPOINT ${HOME}/start-jenkins.sh
+ENTRYPOINT ["/usr/share/jenkins/start.sh"]
