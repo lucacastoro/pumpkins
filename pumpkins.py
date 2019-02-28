@@ -1,12 +1,7 @@
-import sys
-import datetime
-import getpass
-import jenkins
-import re
+import sys, time, datetime, re, jenkins
 import xml.etree.ElementTree as XML
 
 # https://python-jenkins.readthedocs.io/en/latest/api.html
-
 
 class Node(object):
 
@@ -250,7 +245,7 @@ class Build(object):
 
     SLEEP_SECONDS = 1.0
 
-    __slots__ = ('_build', '_job', '_server', '_complete')
+    __slots__ = ('_build', '_job', '_server', '_info_cache')
 
     def __init__(self, build, job, server):
         """c'tor
@@ -261,13 +256,19 @@ class Build(object):
         self._build = build
         self._job = job
         self._server = server
-        self._complete = None
+        self._info_cache = None
 
     @property
     def number(self):
         """the build number
         :return int"""
         return self._build['number']
+
+    @property
+    def job(self):
+        """the parent job
+        :return Job"""
+        return self._job
 
     @property
     def url(self):
@@ -299,7 +300,12 @@ class Build(object):
     def _info(self):
         """the build info structure
         :return dict"""
-        return self._server.get_build_info(self._job.name, self.number)
+        if self._info_cache:
+            return self._info_cache
+        info = self._server.get_build_info(self._job.name, self.number)
+        if 'building' in info and False == info['building']:
+            self._info_cache = info
+        return info
 
     @property
     def env(self):
@@ -319,12 +325,15 @@ class Build(object):
         :return bool"""
         return self._info['building']
 
+    @property
+    def complete(self):
+        """the build ended
+        :return bool"""
+        return not self.building
+
     def wait(self):
         """wait for the build to complete"""
-        if not self._complete:
-            while self.building:
-                time.sleep(self.SLEEP_SECONDS)
-            self._complete = True
+        while not self.complete: time.sleep(self.SLEEP_SECONDS)
 
     @property
     def result(self):
@@ -335,7 +344,7 @@ class Build(object):
         return self._info['result']
 
     @property
-    def succeed(self):
+    def succeeded(self):
         """the build process was successful
         This method waits for the build process to complete if necessary
         :return bool"""
@@ -346,7 +355,7 @@ class Build(object):
         """the build process failed
         This method waits for the build process to complete if necessary
         :return bool"""
-        return not self.succeed
+        return not self.succeeded
 
     @property
     def url(self):
@@ -386,6 +395,35 @@ class Build(object):
         """the build start time
         :return datetime"""
         return datetime.datetime.fromtimestamp(self._info['timestamp'] / 1000)
+
+    @property
+    def next(self):
+        """the next build for the owner job
+        :return the next build or None
+        """
+        cap = self._job.lastBuild.number
+        num = self.number + 1
+        while num <= cap:
+            try:
+                return self._job.build(num)
+            except:
+                pass
+            num += 1
+        return None
+
+    @property
+    def previous(self):
+        """the previous build for the owner job
+        :return the previous build or None
+        """
+        num = self.number - 1
+        while num > 0:
+            try:
+                return self._job.build(num)
+            except:
+                pass
+            num -= 1
+        return None
 
     def __str__(self):
         return self._info['fullDisplayName']
@@ -465,9 +503,7 @@ class Configuration(object):
     this is done through the ._apply() method, that's implicitly called whenever one field of this class is modified.
     """
 
-    __slots__ = ('_node', '_job', '_header')
-
-    _header = "<?xml version='1.0' encoding='UTF-8'?>\n"
+    __slots__ = ('_node', '_job', '_xmlheader')
 
     def __init__(self, conf, job):
         """c'tor
@@ -475,6 +511,7 @@ class Configuration(object):
         :param job, Job, the parent job instance"""
         self._job = job
         self._node = XML.fromstring(conf)
+        self._xmlheader = "<?xml version='1.0' encoding='UTF-8'?>\n"
         assert(self._node.tag == 'project')
 
     @property
@@ -545,7 +582,7 @@ class Configuration(object):
     def toXML(self):
         """string representing the XML content of this configuration
         :return str"""
-        return self._header + XML.tostring(self._node)
+        return self._xmlheader + XML.tostring(self._node)
 
     def _apply(self):
         """notify the related Job instance that something has changed in this configuration, the job will take
@@ -630,14 +667,14 @@ class Job(object):
             args[k] = v
         return Queue(self._server.build_job(self.name, args), self, self._server)
 
-    def build(self, **kwargs):
+    def start(self, **kwargs):
         """schedule a job execution and wait for the build to start
         :param kwargs, a dictionary that will be used to configure the parameters of the build
         :return Build, the build for that job"""
         return self.schedule(**kwargs).build
 
     def wait(self):
-        """wait for the job last build to complete"""
+        """wait for the last build to complete"""
         self.lastBuild.wait()
 
     def enable(self):
@@ -691,7 +728,7 @@ class Job(object):
         return self._info['lastBuildNumber']
 
     @property
-    def concurentBuild(self):
+    def concurrentBuild(self):
         """is concurrent build enabled for this job
         :return bool"""
         return self._info['concurrentBuild']
@@ -702,10 +739,18 @@ class Job(object):
         :return list(Build)"""
         return [Build(b, self, self._server) for b in self._info['builds']]
 
+    def build(self, number):
+        try:
+            return Build(self._server.get_build_info(self.name, number), self, self._server)
+        except (jenkins.NotFoundException, jenkins.JenkinsException):
+            return None
+
     def _get_build(self, name):
         """utility function to retrieve a specific build for this job
         :param name, the name of the build
         :return Build|None"""
+        if name not in self._info:
+            return None
         build = self._info[name]
         if not build:
             return None
@@ -796,18 +841,22 @@ class Job(object):
 
 class Jobs(object):
 
-    """This is a Jobs container"""
+    """A container for jobs"""
 
     __slots__ = ('_server', '_jobs')
     
-    def __init__(self, server):
+    def __init__(self, server, pattern=None):
         """c'tor
         :param server, jenkins.Jenkins, the owner server instance"""
         self._server = server
-        self._jobs = [Job(j, server) for j in self._server.get_jobs()]
+        if pattern:
+            self._jobs = [Job(j, server) for j in self._server.get_job_info_regex(pattern)]
+        else:
+            self._jobs = [Job(j, server) for j in self._server.get_jobs()]
     
     def __contains__(self, name):
-        return bool(self._server.job_exists(name))
+#        return bool(self._server.job_exists(name))
+        return name in (j.name for j in self._jobs)
     
     def __getitem__(self, index):
         """access to the jobs by index
@@ -836,14 +885,6 @@ class Jobs(object):
     def __len__(self):
 #       return self._server.jobs_count()
         return len(self._jobs)
-
-    def create(self, name):
-        """create a new job using an empty configuraion as a template
-        :param name, str, the name of the new job
-        :return Job, the newly created job"""
-        self._server.create_job(name, jenkins.EMPTY_CONFIG_XML)
-        self._jobs = [Job(j, self._server) for j in self._server.get_jobs()]
-        return self.__call__(name)
 
     def __str__(self):
         return "%d jobs" % self.__len__()
@@ -911,15 +952,6 @@ class Host(object):
         :param url, str, the url to the server
         :param username, str, the username to use for the authentication
         :param password, str, the password to use for the authentication"""
-
-        if not username:
-            sys.stdout.write('Username: ')
-            sys.stdout.flush()
-            username = sys.stdin.readline()[:-1]
-
-        if not password:
-            password = getpass.getpass()
-
         self._server = jenkins.Jenkins(url, username, password)
 
     def __bool__(self):  # 3.x
@@ -928,20 +960,36 @@ class Host(object):
         try:
             self.me
             return True
-        except ConnectionError:
-            return False
-        except JenkinsException:
+        except:
             return False
 
     def __nonzero__(self):  # 2.x
         """see __bool__()"""
         return self.__bool__()
 
-    @property
-    def jobs(self):
+    def job(self, name):
+        """return a specific job
+        :param name, str, the name of the job
+        :return the job or None
+        """
+        try:
+            return Job(self._server.get_job_info(name), self._server)
+        except:
+            return None
+
+    def jobs(self, pattern=None):
         """the jobs configured on this server
+        :param pattern, str, a pattern to filter the jobs,
+               if missing all jobs will be returned
         :return Jobs"""
-        return Jobs(self._server)
+        return Jobs(self._server, pattern)
+
+    def createJob(self, name):
+        """create a new job using an empty configuraion as a template
+        :param name, str, the name of the new job
+        :return Job, the newly created job"""
+        self._server.create_job(name, jenkins.EMPTY_CONFIG_XML)
+        return self.job(name)
 
     @property
     def nodes(self):
@@ -963,63 +1011,68 @@ class Host(object):
         """wait for jenkins to enter normal operation mode"""
         self._server.wait_for_normal_op()
 
+    def run(self, script):
+        """Execute a groovy script on the jenkins master node
+        :param script, str, the script
+        :return the output of the script
+        """
+        return self._server.run_script(script)
 
 # Tests
 
-import time
-import unittest
-
-
-class Tester(unittest.TestCase):
-
-    @staticmethod
-    def connect():
-        hostname = 'http://localhost:8080'
-        username = 'admin'
-        password = 'admin'
-        return Host(hostname, username=username, password=password)
-
-    def test_connection(self):
-        host = self.connect()
-        self.assertTrue(host)
-
-    def test_job_lifecycle(self):
-        host = self.connect()
-        self.assertTrue(host)
-
-        name = 'asdasdasd'
-        self.assertTrue(name not in host.jobs)
-
-        job = host.jobs.create(name)
-        self.assertTrue(name in host.jobs)
-
-        job._configuration.buildSteps.add('true')
-
-        self.assertEqual(len(job.builds), 0)
-        a = datetime.datetime.now()
-        queue = job.schedule()
-        b = datetime.datetime.now()
-        queue.wait()  # wait for the job to start
-        c = datetime.datetime.now()
-        queue.build.wait()  # wait for the job to finish
-        d = datetime.datetime.now()
-
-        print('schedule: %s' % (b - a))
-        print('queue.wait: %s' % (c - b))
-        print('build.wait: %s' % (d - c))
-
-        self.assertEqual(len(job.builds), 1)
-        self.assertTrue(job.lastBuild.succeed)
-
-        print(job.lastBuild.duration)
-
-        job._configuration.buildSteps[0] = 'false'
-        self.assertTrue(job.build().failed)
-        self.assertEqual(len(job.builds), 2)
-
-        job.delete()
-        self.assertTrue(name not in host.jobs)
-
-
 if __name__ == '__main__':
+
+    import unittest
+
+    class Tester(unittest.TestCase):
+
+        @staticmethod
+        def connect():
+            hostname = 'http://localhost:8080'
+            username = 'admin'
+            password = 'admin'
+            return Host(hostname, username=username, password=password)
+    
+        def test_connection(self):
+            host = self.connect()
+            self.assertTrue(host)
+    
+        def test_job_lifecycle(self):
+            host = self.connect()
+            self.assertTrue(host)
+    
+            name = 'asdasdasd'
+            self.assertTrue(name not in host.jobs())
+    
+            job = host.createJob(name)
+            self.assertTrue(name in host.jobs())
+            self.assertTrue(None != host.job(name))
+    
+            job._configuration.buildSteps.add('true')
+    
+            self.assertEqual(len(job.builds), 0)
+            a = datetime.datetime.now()
+            queue = job.schedule()
+            b = datetime.datetime.now()
+            queue.wait()  # wait for the job to start
+            c = datetime.datetime.now()
+            queue.build.wait()  # wait for the job to finish
+            d = datetime.datetime.now()
+    
+            print('schedule: %s' % (b - a))
+            print('queue.wait: %s' % (c - b))
+            print('build.wait: %s' % (d - c))
+    
+            self.assertEqual(len(job.builds), 1)
+            self.assertTrue(job.lastBuild.succeeded)
+    
+            print(job.lastBuild.duration)
+    
+            job._configuration.buildSteps[0] = 'false'
+            self.assertTrue(job.build().failed)
+            self.assertEqual(len(job.builds), 2)
+    
+            job.delete()
+            self.assertTrue(name not in host.jobs)
+
     unittest.main()
