@@ -59,6 +59,6 @@ it exposes the 50000 and 8080 TCP ports, only the 8080 is needed to access the w
 I would not bother exposing the 50000 as well.
 
 ## References and Thanks
-The [Jenkins docker image](https://hub.docker.com/r/jenkins/jenkins)
-The [Jenkins Python library](https://python-jenkins.readthedocs.io)
+The [Jenkins docker image](https://hub.docker.com/r/jenkins/jenkins)  
+The [Jenkins Python library](https://python-jenkins.readthedocs.io)  
 Thanks to [Viktor Farcic](https://technologyconversations.com/author/technologyconversations) for his great [blog post](https://technologyconversations.com/2017/06/16/automating-jenkins-docker-setup) on how to deploy Jenkins unsupervised.
