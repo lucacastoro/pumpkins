@@ -1,0 +1,8 @@
+services:
+ - docker
+
+before_script:
+ - docker build -f Dockerfile -t pumpkins .
+
+script:
+ - docker run --rm -it -v $PWD:/staging pumpkins python3 /staging/pumpkins.py
