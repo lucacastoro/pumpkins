@@ -1,6 +1,10 @@
 services:
  - docker
 
+branches:
+  only:
+  - master
+
 before_script:
  - docker build -f Dockerfile -t pumpkins .
 
