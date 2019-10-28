@@ -64,4 +64,4 @@ The [Jenkins Python library](https://python-jenkins.readthedocs.io)
 Thanks to [Viktor Farcic](https://technologyconversations.com/author/technologyconversations) for his great [blog post](https://technologyconversations.com/2017/06/16/automating-jenkins-docker-setup) on how to deploy Jenkins unsupervised.
 
 ---
-[![Build Status](https://travis-ci.org/lucacastoro/pumpkins.svg?branch=master)](https://travis-ci.org/lucacastoro/pumpkins)
+[![Build Status](https://travis-ci.org/lucastoro/pumpkins.svg?branch=master)](https://travis-ci.org/lucastoro/pumpkins)
