@@ -9,4 +9,4 @@ before_script:
  - docker build -f Dockerfile -t pumpkins .
 
 script:
- - docker run --rm -it -v $PWD:/staging pumpkins python3 -m pytest
+  - docker run --rm -it -v $PWD:/staging -w /staging pumpkins python3 -B -m pytest -p no:cacheprovider

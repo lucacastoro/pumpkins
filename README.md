@@ -42,7 +42,7 @@ In[3]: print(host.me)
 ## Testing
 The library comes with a builtin simple unit test suite, it is possible to run it issuing a command like:
 
-`docker run --rm -it -v $PWD:/staging -w /staging pumpkins python3 -m pytest`
+`docker run --rm -it -v $PWD:/staging -w /staging pumpkins python3 -B -m pytest -p no:cacheprovider`
 
 (note that is not necessary to expose TCP/UDP ports for the tests to be executed).
 
