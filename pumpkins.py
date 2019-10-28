@@ -1,4 +1,4 @@
-import sys, time, datetime, re, jenkins
+import sys, time, datetime, re, jenkins, requests
 import xml.etree.ElementTree as XML
 
 # https://python-jenkins.readthedocs.io/en/latest/api.html
@@ -172,7 +172,7 @@ class Queue(object):
      > so you should get/poll the queue information as soon as possible to determine the job's URL.
     """
 
-    SLEEP_SECONDS = 1.0
+    _SLEEP_SECONDS = 1.0
 
     __slots__ = ('_number', '_job', '_server', '_ready')
 
@@ -192,7 +192,7 @@ class Queue(object):
         """wait for the related build process to start"""
         if not self._ready:
             while 'executable' not in self._info:
-                time.sleep(self.SLEEP_SECONDS)
+                time.sleep(self._SLEEP_SECONDS)
             self._ready = True
 
     @property
@@ -236,6 +236,51 @@ class Queue(object):
         self._server.cancel_queue(self.id)
 
 
+class Artifact(object):
+
+    __slots__ = ('build', '_data', '_content')
+
+    def __init__(self, build, data):
+        self.build = build
+        self._data = data
+        self._content = None
+
+    @property
+    def displayPath(self):
+        return self._data.get('displayPath', None)
+
+    @property
+    def fileName(self):
+        return self._data.get('fileName', None)
+
+    @property
+    def relativePath(self):
+        return self._data.get('relativePath', None)
+
+    @property
+    def fullPath(self):
+        return self.build.url + 'artifact/' + self.relativePath
+
+    def _fetch(self):
+        if self._content is None:
+            self._content = requests.get(self.fullPath)
+        return self._content
+
+    @property
+    def content(self):
+        return self._fetch().content
+
+    @property
+    def text(self):
+        return self._fetch().text
+
+    def __str__(self):
+        return self.fileName
+
+    def __repr__(self):
+        return self.__str__()
+
+
 class Build(object):
 
     """Represents job build process.
@@ -243,7 +288,7 @@ class Build(object):
     available only when the build process is complete, as the build duration, the build result and so on.
     """
 
-    SLEEP_SECONDS = 1.0
+    _SLEEP_SECONDS = 1.0
 
     __slots__ = ('_build', '_job', '_server', '_info_cache')
 
@@ -333,7 +378,7 @@ class Build(object):
 
     def wait(self):
         """wait for the build to complete"""
-        while not self.completed: time.sleep(self.SLEEP_SECONDS)
+        while not self.completed: time.sleep(self._SLEEP_SECONDS)
 
     @property
     def result(self):
@@ -395,6 +440,10 @@ class Build(object):
         """the build start time
         :return datetime"""
         return datetime.datetime.fromtimestamp(self._info['timestamp'] / 1000)
+
+    @property
+    def artifacts(self):
+        return [Artifact(self, x) for x in self._info['artifacts']]
 
     @property
     def next(self):
@@ -633,7 +682,7 @@ class Job(object):
     def color(self):
         """the 'color' of the job
         :return str"""
-        return self._job['color']
+        return self._job.get('color')
 
     @property
     def fullname(self):
@@ -853,7 +902,7 @@ class Jobs(object):
         if pattern:
             self._jobs = [Job(j, server) for j in self._server.get_job_info_regex(pattern)]
         else:
-            self._jobs = [Job(j, server) for j in self._server.get_jobs()]
+            self._jobs = [Job(j, server) for j in self._server.get_jobs(view)]
     
     def __contains__(self, name):
 #        return bool(self._server.job_exists(name))
@@ -871,7 +920,7 @@ class Jobs(object):
     def __call__(self, name):
         """access the job by name
         :param name, str, the job name
-       :return Job or None"""
+        :return Job or None"""
 #       j = self._server.get_job_info(name)
 #       return None if not j else Job({
 #           '_class': j['_class'],
@@ -983,7 +1032,7 @@ class Host(object):
         :param pattern, str, a pattern to filter the jobs,
                if missing all jobs will be returned
         :return Jobs"""
-        return Jobs(self._server, pattern)
+        return Jobs(self._server, pattern=pattern)
 
     def createJob(self, name):
         """create a new job using an empty configuraion as a template
