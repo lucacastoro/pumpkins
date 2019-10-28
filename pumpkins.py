@@ -902,7 +902,7 @@ class Jobs(object):
         if pattern:
             self._jobs = [Job(j, server) for j in self._server.get_job_info_regex(pattern)]
         else:
-            self._jobs = [Job(j, server) for j in self._server.get_jobs(view)]
+            self._jobs = [Job(j, server) for j in self._server.get_jobs()]
     
     def __contains__(self, name):
 #        return bool(self._server.job_exists(name))
