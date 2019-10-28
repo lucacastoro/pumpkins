@@ -326,14 +326,14 @@ class Build(object):
         return self._info['building']
 
     @property
-    def complete(self):
+    def completed(self):
         """the build ended
         :return bool"""
         return not self.building
 
     def wait(self):
         """wait for the build to complete"""
-        while not self.complete: time.sleep(self.SLEEP_SECONDS)
+        while not self.completed: time.sleep(self.SLEEP_SECONDS)
 
     @property
     def result(self):
@@ -1018,6 +1018,12 @@ class Host(object):
         :return the output of the script
         """
         return self._server.run_script(script)
+
+    @property
+    def version(self):
+        """master version
+        :return version"""
+        return self._server.get_version()
 
 # Tests
 
