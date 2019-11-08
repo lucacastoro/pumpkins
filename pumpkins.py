@@ -481,7 +481,30 @@ class Build(object):
         return self.__str__()
 
 
-class BuildSteps(object):
+class Configuration(object):
+
+    __slots__ = ('node', '_parent')
+
+    XML_HEADER = "<?xml version='1.0' encoding='UTF-8'?>\n"
+
+    def __init__(self, xml, parent):
+        self.node = XML.fromstring(xml) if isinstance(xml, str) else xml
+        self._parent = parent
+
+    def apply(self, sub=None):
+        self._parent.apply(self)
+
+    def __str__(self):
+        """string representing the XML content of this configuration
+        :return str"""
+        encoding = 'utf-8'
+        return self.XML_HEADER + XML.tostring(self.node).decode(encoding)
+
+    def __repr__(self):
+        return self.__str__()
+
+
+class BuildSteps(Configuration):
 
     """The jobs consist of a number of parameters and a sequence of build steps.
     This class represents a sequence of build steps"""
@@ -489,18 +512,13 @@ class BuildSteps(object):
     def __init__(self, node, conf):
         """c'tor
         :param node, XML.Node, the <builders> node in the job configuration"""
-        assert (node.tag == 'builders')
-        self._node = node
-        self._conf = conf
+        super().__init__(node, conf)
+        assert self.node.tag == 'builders'
 
     def __len__(self):
         """the number of steps for this configuration
         :return int"""
-        return len(self._node)
-
-    def _apply(self):
-        """utility function, propagate the change to the parent entity"""
-        self._conf._apply()
+        return len(self.node)
 
     def add(self, script):
         """add a script to be executed by the job
@@ -509,27 +527,27 @@ class BuildSteps(object):
         comm = XML.Element('command')
         comm.text = script
         node.append(comm)
-        self._node.append(node)
-        self._apply()
+        self.node.append(node)
+        self.apply()
 
     def __getitem__(self, index):
         """retrieve a specific step's script
         :param index, int, the index of the step to set
         :return str, the script assigned to the step"""
-        return self._node[index].find('command').text
+        return self.node[index].find('command').text
 
     def __setitem__(self, index, value):
         """sets a specific step
         :param index, int, the index of the step to set
         :param value, str, the script to assign to the step"""
-        self._node[index].find('command').text = value
-        self._apply()
+        self.node[index].find('command').text = value
+        self.apply()
 
     def __delitem__(self, index):
         """remove a build step from the list
         :param index, int, the index of the step to remove"""
-        self._node.remove(self._node[index])
-        self._apply()
+        self.node.remove(self.node[index])
+        self.apply()
 
     def __str__(self):
         if 0 == self.__len__():
@@ -542,26 +560,24 @@ class BuildSteps(object):
         return self.__str__()
 
 
-class Configuration(object):
+class JobConfiguration(Configuration):
 
     """Every job is described by a complex XML configuration document,
     this class tries to ease the manipulation of such XML document.
     You can see the job configuration document at:
         http[s]://[hostname]/job/[jobname]/config.xml
     To change a job parameter you have to reissue the whole configuration to the server,
-    this is done through the ._apply() method, that's implicitly called whenever one field of this class is modified.
+    this is done through the .apply() method, that's implicitly called whenever one field of this class is modified.
     """
 
-    __slots__ = ('_node', '_job', '_xmlheader')
+    __slots__ = ()
 
-    def __init__(self, conf, job):
+    def __init__(self, node, job):
+        super().__init__(node, job)
         """c'tor
         :param conf, str, the configuration document content as XML
         :param job, Job, the parent job instance"""
-        self._job = job
-        self._node = XML.fromstring(conf)
-        self._xmlheader = "<?xml version='1.0' encoding='UTF-8'?>\n"
-        assert(self._node.tag == 'project')
+        assert self.node.tag == 'project'
 
     @property
     def actions(self):
@@ -571,14 +587,17 @@ class Configuration(object):
         """utility function used to ease propagating changes to the owner job
         :param name, str, the field to change in this configuration
         :param value, object, the new value of that field"""
-        self._node.find(name).text = str(value)
-        self._apply()
+        self.node.find(name).text = str(value)
+        self.apply()
+
+    def _find(self, name):
+        return self.node.find(name)
 
     @property
     def description(self):
         """the job description
         :return str"""
-        return self._node.find('description').text
+        return self._find('description').text
 
     @description.setter
     def set_description(self, cb):
@@ -590,7 +609,7 @@ class Configuration(object):
     def canRoam(self):
         """the job can roam
         :return bool"""
-        return bool(self._node.find('canRoam').text)
+        return bool(self._find('canRoam').text)
 
     @canRoam.setter
     def set_canRoam(self, cb):
@@ -614,7 +633,7 @@ class Configuration(object):
     def concurrentBuild(self):
         """the job is can be ran concurrently
         :return bool"""
-        return bool(self._node.find('concurrentBuild').text)
+        return bool(self._find('concurrentBuild').text)
 
     @concurrentBuild.setter
     def set_concurrentBuild(self, cb):
@@ -626,25 +645,7 @@ class Configuration(object):
     def buildSteps(self):
         """the job build steps
         :return BuildSteps"""
-        return BuildSteps(self._node.find('builders'), self)
-
-    def toXML(self):
-        """string representing the XML content of this configuration
-        :return str"""
-        encoding = 'utf-8'
-        return self._xmlheader + XML.tostring(self._node).decode(encoding)
-
-    def _apply(self):
-        """notify the related Job instance that something has changed in this configuration, the job will take
-        care of propagating the change to the server, eventually invoking .toXML()"""
-        self._job._apply(self)
-
-    def __str__(self):
-        text = self._node.text
-        return text if text else ''
-    
-    def __repr__(self):
-        return self.__str__()
+        return BuildSteps(self._find('builders'), self)
 
 
 class Job(object):
@@ -693,13 +694,13 @@ class Job(object):
     @property
     def _configuration(self):
         """the local representation of this job configuration
-        :return Configuration"""
-        return Configuration(self._server.get_job_config(self.name), self)
+        :return JobConfiguration"""
+        return JobConfiguration(self._server.get_job_config(self.name), self)
 
-    def _apply(self, conf):
+    def apply(self, conf):
         """propagate to the server the given configuration
-        :param conf, Configuration, the configuration to apply"""
-        self._server.reconfig_job(self.name, conf.toXML())
+        :param conf, JobConfiguration, the configuration to apply"""
+        self._server.reconfig_job(self.name, str(conf))
 
     def copy(self, newname):
         """create a new job using the current one as a template
@@ -826,7 +827,7 @@ class Job(object):
         prop = self._info['property']
         if not prop:
             return []
-        assert(len(prop) == 1)
+        assert len(prop) == 1
         defs = prop[0]['parameterDefinitions']
         if not defs:
             return []
@@ -943,6 +944,78 @@ class Jobs(object):
         return self.__str__()
 
 
+class ViewConfiguration(Configuration):
+
+    # <hudson.model.ListView>
+    #     <name>tpsi trunk</name>
+    #     <description>Creation, basic validation and functional tests for COD trunk&lt;!-- Managed by Jenkins Job Builder --&gt;</description>
+    #     <filterExecutors>false</filterExecutors>
+    #     <filterQueue>false</filterQueue>
+    #     <properties class="hudson.model.View$PropertyList" />
+    #     <jobNames>
+    #         <comparator class="hudson.util.CaseInsensitiveComparator" />
+    #     </jobNames>
+    #     <jobFilters />
+    #     <columns>
+    #         <hudson.views.StatusColumn />
+    #         <jenkins.plugins.extracolumns.LastBuildConsoleColumn plugin="extra-columns@1.20" />
+    #         <hudson.views.WeatherColumn />
+    #         <hudson.views.JobColumn />
+    #         <jenkins.plugins.extracolumns.BuildDescriptionColumn plugin="extra-columns@1.20">
+    #             <columnWidth>3</columnWidth>
+    #             <forceWidth>false</forceWidth>
+    #         </jenkins.plugins.extracolumns.BuildDescriptionColumn>
+    #         <hudson.views.LastSuccessColumn />
+    #         <hudson.views.LastFailureColumn />
+    #         <hudson.views.LastDurationColumn />
+    #     </columns>
+    #     <includeRegex>(ha-)?trunk-(\\d|\\w)+(-opg)?-(bright|tpsi).*</includeRegex>
+    #     <recurse>false</recurse>
+    # </hudson.model.ListView>
+
+    def __init__(self, node, view):
+        super().__init__(node, view)
+        assert self.node.tag == 'hudson.model.ListView'
+
+
+class View(object):
+
+    """A view"""
+
+    __slots__ = ('name', '_server', '_cache')
+
+    def __init__(self, name, server):
+        self.name = name
+        self._server = server
+        self._cache = None
+
+    @property
+    def _config(self):
+        if self._cache is None:
+            self._cache = ViewConfiguration(self._server.get_view_config(self.name), self)
+        return self._cache
+
+    def apply(self, config):
+        self._server.reconfig_view(self.name, str(config))
+
+    def delete(self):
+        self._server.delete_view(self.name)
+
+    def __str__(self):
+        return self.name
+
+    def __repr__(self):
+        return self.__str__()
+
+    # -- configuration --
+    # here we forward the job attributes to the underlying JobConfiguration
+
+    def __getattr__(self, name):
+        if hasattr(self._config, name):
+            return getattr(self._config, name)
+        raise AttributeError('Attribute %s not found' % name)
+
+
 class User(object):
 
     """An user"""
@@ -1040,6 +1113,17 @@ class Host(object):
         :return Job, the newly created job"""
         self._server.create_job(name, jenkins.EMPTY_CONFIG_XML)
         return self.job(name)
+
+    @property
+    def views(self):
+        return [View(v['name'], self._server) for v in self._server.get_views()]
+
+    def view(self, name):
+        return View(name, self._server)
+
+    def createView(self, name):
+        self._server.create_view(name, jenkins.EMPTY_VIEW_CONFIG_XML)
+        return self.view(name)
 
     @property
     def nodes(self):

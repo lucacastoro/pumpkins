@@ -2,18 +2,19 @@ import datetime
 import pytest
 import pumpkins
 
+hostname = 'http://localhost:8080'
+username = 'admin'
+password = 'admin'
+
 @pytest.fixture
 def host():
-    hostname = 'http://localhost:8080'
-    username = 'admin'
-    password = 'admin'
     return pumpkins.Host(hostname, username=username, password=password)
 
 def test_connection(host):
     assert host
 
 def test_user(host):
-    assert host.me.name == 'admin'
+    assert host.me.name == username
 
 def test_job_lifecycle(host):
     assert host
